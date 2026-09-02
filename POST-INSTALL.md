@@ -23,35 +23,46 @@ moved after install; rerun `./install.sh`.
 ## 2. The hook is silent for other subagents
 
 Ask for anything that uses a different subagent — "explore how X works" — and
-confirm **no** review message appears.
+confirm **no** verification-required message appears in that subagent's
+transcript.
 
-*If a review message appears:* the `subagent_type` filter in
-`hooks/local-exec-review.py` isn't matching. Add a debug line dumping the
-payload to a file and inspect what the field is actually called.
+*If a message appears:* the `matcher: "local-exec"` entry for `SubagentStop`
+in `~/.claude/settings.json` isn't scoped correctly, or points at the wrong
+`agent_type`. Check the entry's `matcher` field.
 
-## 3. The hook fires for local-exec
+## 3. The hook fires for local-exec, and only after ollama-gen
 
 In a git repo with a **clean tree**, explicitly ask: *"use local-exec to write a
 `greet(name)` utility in `src/greet.py`"*.
 
-Expect, after the subagent returns, a message stating its output is unreviewed
-and instructing a `git diff` — and then Claude actually running `git diff` and
-commenting on the code before saying it's done.
+Expand local-exec's own transcript. Expect: an `ollama-gen` call, then (if
+local-exec tries to stop without verifying) a blocked-stop message telling it
+to run the project's lint/typecheck/build/test — and then local-exec actually
+running something and succeeding before it's allowed to finish. This is
+enforced on local-exec itself, not on the orchestrating Claude — see
+`README.md`'s description of `hooks/local-exec-review.py` for why.
 
-*If nothing appears:* confirm the `PostToolUse` entry is in
-`~/.claude/settings.json` and that the command path is executable. Test it
-standalone:
+*If nothing appears, or local-exec is never blocked even without verifying:*
+confirm the `SubagentStop`/`local-exec` entry is in `~/.claude/settings.json`
+and that the command path is executable. Test it standalone against a fixture
+transcript:
 
 ```sh
-echo '{"cwd":"'"$PWD"'","tool_input":{"subagent_type":"local-exec"}}' \
+cat > /tmp/local-exec-review-test.jsonl <<'EOF'
+{"message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ollama-gen --task \"greet util\" --out src/greet.py"}}]}}
+{"message":{"content":[{"type":"tool_result","tool_use_id":"tu1","is_error":false,"content":"Created src/greet.py (5 lines)."}]}}
+EOF
+echo '{"transcript_path":"/tmp/local-exec-review-test.jsonl"}' \
   | ~/.claude/hooks/local-exec-review.py; echo "exit=$?"
 ```
 
-Expect the message on stderr and `exit=2`.
+Expect the "haven't verified" message on stderr and `exit=2`. Append a
+successful `Bash` tool_use/tool_result pair (any command, exit 0) to the
+fixture after the `ollama-gen` pair and re-run — expect `exit=0`.
 
-*If the message appears but Claude ignores it:* that's the interesting failure.
-Note it — the enforcement mechanism is the whole basis for delegating to a model
-this small.
+*If the message appears but local-exec ignores it and stops anyway:* that's
+the interesting failure. Note it — this enforcement is the whole basis for
+trusting a model this small with unattended file writes.
 
 ## 4. Context files are not read into context — the important one
 
@@ -107,15 +118,18 @@ files; whole-file generation degrades past a few hundred lines.
 
 ---
 
-## Upgrading from a pre-#1 install
+## Upgrading from a pre-#2 install
 
-If `~/.claude/settings.json` still has `"matcher": "Task"` under
-`PostToolUse` (from an install before the
-[Task→Agent rename fix](https://github.com/rpbaptist/ollama-subagent/issues/1)),
-the hook never fires — the harness's subagent-launching tool is actually named
-`Agent`, not `Task`. Rerun `./install.sh`: it detects the existing entry by
-its `command`, not its stale matcher, and rewrites the matcher to `"*"` in
-place. No manual rollback needed.
+If `~/.claude/settings.json` still has a `PostToolUse` entry for
+`hooks/local-exec-review.py` (from an install before the
+[SubagentStop redesign](https://github.com/rpbaptist/ollama-subagent/issues/2)
+— including the brief `Task`→`Agent` matcher fix in
+[#1](https://github.com/rpbaptist/ollama-subagent/issues/1)), that design
+never saw local-exec's real output: subagent launches are async in this
+harness, so `PostToolUse` fired at launch, before local-exec had written
+anything. Rerun `./install.sh`: it detects the stale `PostToolUse` entry by
+its `command`, removes it, and adds the `SubagentStop` entry instead. No
+manual rollback needed.
 
 ## Rollback
 

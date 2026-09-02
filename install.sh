@@ -49,36 +49,58 @@ if os.path.exists(path):
         data = json.load(f)
 
 hooks = data.setdefault("hooks", {})
-post = hooks.setdefault("PostToolUse", [])
+changed = False
 
-for entry in post:
-    for h in entry.get("hooks", []):
-        if h.get("command") == cmd:
-            if entry.get("matcher") == "*":
-                print("  ok      PostToolUse hook already present")
-            else:
-                shutil.copy2(path, path + ".bak")
-                print(f"  backup  {path}.bak")
-                entry["matcher"] = "*"
-                with open(path, "w") as f:
-                    json.dump(data, f, indent=2)
-                    f.write("\n")
-                print("  upgraded PostToolUse matcher -> *")
-            sys.exit(0)
+# Migration: a pre-#2 install registered this hook under PostToolUse. That
+# design is dead (async Task launches never let PostToolUse see local-exec's
+# real output) -- drop any such entry so the repurposed script isn't left
+# wired to an event shape it no longer expects.
+post = hooks.get("PostToolUse")
+if post is not None:
+    kept = []
+    for entry in post:
+        entry_hooks = [h for h in entry.get("hooks", []) if h.get("command") != cmd]
+        if len(entry_hooks) != len(entry.get("hooks", [])):
+            changed = True
+            if entry_hooks:
+                entry["hooks"] = entry_hooks
+                kept.append(entry)
+            # else: entry only existed for this hook -- drop it entirely
+        else:
+            kept.append(entry)
+    if changed:
+        if kept:
+            hooks["PostToolUse"] = kept
+        else:
+            del hooks["PostToolUse"]
 
-if os.path.exists(path):
-    shutil.copy2(path, path + ".bak")
-    print(f"  backup  {path}.bak")
+stop = hooks.setdefault("SubagentStop", [])
 
-post.append({
-    "matcher": "*",
-    "hooks": [{"type": "command", "command": cmd}],
-})
+already = False
+for entry in stop:
+    if entry.get("matcher") == "local-exec":
+        for h in entry.get("hooks", []):
+            if h.get("command") == cmd:
+                already = True
 
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-print("  added   PostToolUse hook")
+if already and not changed:
+    print("  ok      SubagentStop hook already present")
+else:
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".bak")
+        print(f"  backup  {path}.bak")
+    if not already:
+        stop.append({
+            "matcher": "local-exec",
+            "hooks": [{"type": "command", "command": cmd}],
+        })
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    if changed:
+        print("  removed stale PostToolUse hook")
+    if not already:
+        print("  added   SubagentStop hook")
 PY
 
 echo "CLAUDE.md:"

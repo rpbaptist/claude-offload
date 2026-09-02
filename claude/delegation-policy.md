@@ -15,6 +15,8 @@ architecture or design decisions, subtle logic or debugging, non-trivial
 refactors, security-sensitive code, or any task where writing a precise
 description would cost more than making the edit directly.
 
-After local-exec returns, a hook will require you to review its output. That
-review is mandatory: the output is from a 20B model and is frequently
-plausible-looking but wrong.
+A hook forces local-exec to verify its own output (run the project's
+lint/typecheck/build/test successfully) before it's allowed to stop — that
+part is mandatory and enforced. It only catches mechanical breakage, though,
+not a plausible-looking wrong approach. The output is from a 20B model, so
+still look it over yourself before treating the task as done.

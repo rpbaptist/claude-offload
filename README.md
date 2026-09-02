@@ -1,7 +1,7 @@
 # ollama-subagent
 
 Route mechanical code generation from Claude Code to a local Ollama model, and
-force Claude to review the result.
+force that output to be verified before it's handed back.
 
 Claude Code stays on planning, architecture and review. Boilerplate — DTOs,
 CRUD handlers, config files, test stubs — gets written by a local model for
@@ -53,9 +53,12 @@ immediately — and backs up anything it modifies:
 | `~/.claude/agents/local-exec.md` | `agents/local-exec.md` |
 | `~/.claude/hooks/local-exec-review.py` | `hooks/local-exec-review.py` |
 
-It also merges a `PostToolUse` hook into `~/.claude/settings.json` (backing it
-up to `settings.json.bak`, leaving other hooks untouched) and appends
-`claude/delegation-policy.md` to `~/.claude/CLAUDE.md`.
+It also merges a `SubagentStop` hook into `~/.claude/settings.json` (backing
+it up to `settings.json.bak`, leaving other hooks untouched — and removing
+any stale `PostToolUse` registration from a pre-#2 install, see
+["Upgrading from a pre-#2 install"](POST-INSTALL.md#upgrading-from-a-pre-2-install)
+in `POST-INSTALL.md`) and appends `claude/delegation-policy.md` to
+`~/.claude/CLAUDE.md`.
 
 Restart Claude Code afterwards.
 
@@ -89,18 +92,29 @@ failure. It has no `Write` tool, so file creation must go through the local
 model. All of this happens in an isolated context, so a multi-file batch's
 generate/lint/retry turns never touch your main session.
 
-**`hooks/local-exec-review.py`** — a `PostToolUse` hook (matcher `"*"`, so it
-runs after every tool call) that filters in-script on
-`tool_input.subagent_type == "local-exec"`, rather than matching on the
-subagent-launching tool's own name — that name has already changed once
-across harness versions (`Task` → `Agent`; see
-[#1](https://github.com/rpbaptist/ollama-subagent/issues/1)). When
-`local-exec` returns, it tells the orchestrator to review the output before
-treating the work as done. It exits silently for every other tool call.
+**`hooks/local-exec-review.py`** — a `SubagentStop` hook (matcher
+`"local-exec"`, matched declaratively on `agent_type` — no in-script
+filtering needed) that scans local-exec's own transcript for its last
+`ollama-gen` call and blocks it from stopping until a later Bash command
+after that call exits 0.
 
-`PostToolUse` ignores `decision` and `additionalContext`, but exit code 2 shows
-stderr to Claude — that's the injection channel. `SubagentStop` can't be used
-here: it cannot reach the parent session.
+This is a narrower guarantee than it sounds: `SubagentStop`'s exit-code-2
+block only reaches the subagent that's trying to stop, never the parent
+session, so this cannot force the orchestrator to review anything (see
+[#2](https://github.com/rpbaptist/ollama-subagent/issues/2) — subagent
+launches are async in this harness, and no hook fires in the parent's
+context when an async subagent's result actually arrives). What it *can*
+enforce is that local-exec verifies its own output — runs the project's
+lint/typecheck/build/test and gets a clean exit — before it's allowed to
+stop. That's mechanical self-verification, not judgment-level review; the
+orchestrator is still asked (in `claude/delegation-policy.md`, prompt-level
+only) to look the output over itself. See
+[`docs/adr/0001-subagentstop-self-verification.md`](docs/adr/0001-subagentstop-self-verification.md)
+for why.
+
+Trivial single-file edits local-exec makes directly (no `ollama-gen` call —
+see step 2 of `agents/local-exec.md`) are exempt; the hook only blocks after
+an actual `ollama-gen` invocation.
 
 ## Configuration
 
@@ -118,8 +132,10 @@ pseudocode → code, docstrings, mechanical repetitive edits.
 
 **No:** anything spanning multiple files, architecture or design decisions,
 subtle logic, non-trivial refactors, security-sensitive code. A 20B model
-produces plausible-looking wrong output with no awareness that it's wrong. The
-review step exists for exactly this.
+produces plausible-looking wrong output with no awareness that it's wrong.
+The verification step catches mechanical breakage (syntax errors, failing
+lint/build/tests); it can't catch a plausible-looking wrong approach. That's
+still on whoever reviews the diff.
 
 A whole plan cannot be handed over. Planning stays with Claude, which decomposes
 it into single-file, unambiguous tasks; only those go local.
