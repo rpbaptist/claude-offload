@@ -2,7 +2,7 @@
 
 `hooks/local-exec-review.py` originally used `PostToolUse` + exit-code-2 to
 force the orchestrating Claude to review local-exec's output before treating
-delegated work as done. That broke ([#2](https://github.com/rpbaptist/ollama-subagent/issues/2)):
+delegated work as done. That broke ([#2](https://github.com/rpbaptist/claude-offload/issues/2)):
 subagent launches are async in this harness, so `PostToolUse` fires 2ms after
 launch, before local-exec has written anything — and never fires again on
 completion.

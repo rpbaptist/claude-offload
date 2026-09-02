@@ -1,4 +1,4 @@
-# ollama-subagent
+# claude-offload
 
 Routes mechanical code generation from Claude Code to a local Ollama model
 (via the `local-exec` subagent and `ollama-gen` CLI), and enforces that the

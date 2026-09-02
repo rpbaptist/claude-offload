@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install ollama-subagent into ~/.claude and ~/.local/bin. Idempotent.
+# Install claude-offload into ~/.claude and ~/.local/bin. Idempotent.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

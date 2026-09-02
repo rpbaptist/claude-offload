@@ -1,4 +1,4 @@
-# ollama-subagent
+# claude-offload
 
 Route mechanical code generation from Claude Code to a local Ollama model, and
 force that output to be verified before it's handed back.
@@ -42,8 +42,8 @@ This is now measurable, not just architectural — see
 Requires Python 3 (stdlib only), `git`, and a running Ollama.
 
 ```sh
-git clone https://github.com/rpbaptist/ollama-subagent ~/code/ollama-subagent
-cd ~/code/ollama-subagent
+git clone https://github.com/rpbaptist/claude-offload ~/code/claude-offload
+cd ~/code/claude-offload
 ./install.sh
 ```
 
@@ -59,7 +59,7 @@ immediately — and backs up anything it modifies:
 It also merges a `SubagentStop` hook into `~/.claude/settings.json` (backing
 it up to `settings.json.bak`, leaving other hooks untouched — and removing
 any stale `PostToolUse` registration left by an install from before the
-[SubagentStop redesign](https://github.com/rpbaptist/ollama-subagent/issues/2))
+[SubagentStop redesign](https://github.com/rpbaptist/claude-offload/issues/2))
 and appends `claude/delegation-policy.md` to `~/.claude/CLAUDE.md`.
 
 Restart Claude Code afterwards.
@@ -146,7 +146,7 @@ In a fresh session, ask for something qualifying without mentioning local-exec:
 
 Expect a one-line announcement — *"Delegating the user DTO to local-exec"* —
 followed by the subagent call (`Agent` in this harness; see
-[#1](https://github.com/rpbaptist/ollama-subagent/issues/1)).
+[#1](https://github.com/rpbaptist/claude-offload/issues/1)).
 
 *If it does the work itself:* the `CLAUDE.md` policy isn't landing. Check it
 survived (`grep -n "Delegating mechanical" ~/.claude/CLAUDE.md`). If present,
@@ -253,7 +253,7 @@ after that call exits 0.
 This is a narrower guarantee than it sounds: `SubagentStop`'s exit-code-2
 block only reaches the subagent that's trying to stop, never the parent
 session, so this cannot force the orchestrator to review anything (see
-[#2](https://github.com/rpbaptist/ollama-subagent/issues/2) — subagent
+[#2](https://github.com/rpbaptist/claude-offload/issues/2) — subagent
 launches are async in this harness, and no hook fires in the parent's
 context when an async subagent's result actually arrives). What it *can*
 enforce is that local-exec verifies its own output — runs the project's
