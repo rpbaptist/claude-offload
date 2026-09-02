@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Generate a file with a local Ollama model. Prints a short summary only."""
+import argparse
+import difflib
+import json
+import os
+import sys
+import urllib.request
+from pathlib import Path
+
+OLLAMA_URL = os.environ.get("OLLAMA_HOST_URL", "http://localhost:11434") + "/api/chat"
+MODEL = os.environ.get("OLLAMA_GEN_MODEL", "gpt-oss-20b-32k:latest")
+
+SYSTEM = ("You are a code generator. Output ONLY the complete contents of the "
+          "requested file. No explanations, no commentary, no markdown fences.")
+
+
+def die(msg, code=1):
+    print(f"ollama-gen: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def strip_fences(text):
+    """Defensive: the model usually complies, but not always."""
+    lines = text.strip().split("\n")
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+    return "\n".join(lines).strip() + "\n"
+
+
+def call_ollama(prompt, timeout):
+    payload = {"model": MODEL, "stream": False, "think": False,
+               "messages": [{"role": "system", "content": SYSTEM},
+                            {"role": "user", "content": prompt}]}
+    req = urllib.request.Request(
+        OLLAMA_URL, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except Exception as e:
+        die(f"Ollama call failed: {e}. Is `ollama serve` running?")
+    # message.thinking is discarded on purpose; only content is the file.
+    return body.get("message", {}).get("content", "")
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Generate a file with a local Ollama model.")
+    p.add_argument("--task", required=True, help="what to generate")
+    p.add_argument("--out", required=True, help="target file path")
+    p.add_argument("--context", action="append", default=[],
+                   help="file path to give the model as context (repeatable)")
+    p.add_argument("--force", action="store_true",
+                   help="required to overwrite an existing file")
+    p.add_argument("--timeout", type=int, default=300)
+    a = p.parse_args()
+
+    out = Path(a.out).expanduser().resolve()
+    cwd = Path.cwd().resolve()
+    if not str(out).startswith(str(cwd) + os.sep):
+        die(f"refusing to write outside cwd: {out}")
+    if out.exists() and not a.force:
+        die(f"refusing: {a.out} exists (use --force to overwrite)")
+
+    before = out.read_text() if out.exists() else ""
+
+    ctx = ""
+    for cf in a.context:
+        cp = Path(cf).expanduser()
+        if not cp.exists():
+            die(f"context file not found: {cf}")
+        ctx += f"\n--- {cf} ---\n{cp.read_text()}\n"
+
+    prompt = (f"Task: {a.task}\n"
+              f"{('Context files:' + ctx) if ctx else ''}\n"
+              f"Write the complete contents of {a.out}.")
+
+    generated = strip_fences(call_ollama(prompt, a.timeout))
+    if not generated.strip():
+        die("model returned empty output")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(generated)
+
+    n = len(generated.splitlines())
+    if not before:
+        print(f"Created {a.out} ({n} lines).")
+    else:
+        d = list(difflib.unified_diff(before.splitlines(),
+                                      generated.splitlines(), lineterm=""))
+        plus = sum(1 for l in d if l.startswith("+") and not l.startswith("+++"))
+        minus = sum(1 for l in d if l.startswith("-") and not l.startswith("---"))
+        print(f"Wrote {a.out} (+{plus}/-{minus} lines, {n} total).")
+
+
+if __name__ == "__main__":
+    main()
