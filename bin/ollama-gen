@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate a file with a local Ollama model. Prints a short summary only."""
 import argparse
+import datetime
 import difflib
 import json
 import os
@@ -10,6 +11,8 @@ from pathlib import Path
 
 OLLAMA_URL = os.environ.get("OLLAMA_HOST_URL", "http://localhost:11434") + "/api/chat"
 MODEL = os.environ.get("OLLAMA_GEN_MODEL", "gpt-oss-20b-32k:latest")
+CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
+LOG_PATH = Path(os.environ.get("OLLAMA_GEN_LOG", CLAUDE_DIR / "ollama-gen-usage.jsonl")).expanduser()
 
 SYSTEM = ("You are a code generator. Output ONLY the complete contents of the "
           "requested file. No explanations, no commentary, no markdown fences.")
@@ -43,7 +46,33 @@ def call_ollama(prompt, timeout):
     except Exception as e:
         die(f"Ollama call failed: {e}. Is `ollama serve` running?")
     # message.thinking is discarded on purpose; only content is the file.
-    return body.get("message", {}).get("content", "")
+    content = body.get("message", {}).get("content", "")
+    return content, body.get("prompt_eval_count"), body.get("eval_count")
+
+
+def log_usage(out_arg, context_args, context_bytes, generated_bytes,
+              empty_output, prompt_eval_count, eval_count):
+    """Append one real+estimated usage row. Never lets a logging failure
+    block the actual generation -- only the write itself is guarded."""
+    row = {
+        "ts": datetime.datetime.now(datetime.timezone.utc)
+              .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "model": MODEL,
+        "out": out_arg,
+        "context_files": context_args,
+        "context_bytes": context_bytes,
+        "generated_bytes": generated_bytes,
+        "empty_output": empty_output,
+        "prompt_eval_count": prompt_eval_count,
+        "eval_count": eval_count,
+        "estimated_tokens_avoided": round((context_bytes + generated_bytes) / 4),
+    }
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_PATH, "a") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError:
+        pass
 
 
 def main():
@@ -68,18 +97,26 @@ def main():
     before = out.read_text() if out.exists() else ""
 
     ctx = ""
+    context_bytes = 0
     for cf in a.context:
         cp = Path(cf).expanduser()
         if not cp.exists():
             die(f"context file not found: {cf}")
-        ctx += f"\n--- {cf} ---\n{cp.read_text()}\n"
+        text = cp.read_text()
+        context_bytes += len(text.encode("utf-8"))
+        ctx += f"\n--- {cf} ---\n{text}\n"
 
     prompt = (f"Task: {a.task}\n"
               f"{('Context files:' + ctx) if ctx else ''}\n"
               f"Write the complete contents of {a.out}.")
 
-    generated = strip_fences(call_ollama(prompt, a.timeout))
-    if not generated.strip():
+    raw, prompt_eval_count, eval_count = call_ollama(prompt, a.timeout)
+    generated = strip_fences(raw)
+    empty_output = not generated.strip()
+    log_usage(a.out, a.context, context_bytes,
+              0 if empty_output else len(generated.encode("utf-8")),
+              empty_output, prompt_eval_count, eval_count)
+    if empty_output:
         die("model returned empty output")
 
     out.parent.mkdir(parents=True, exist_ok=True)

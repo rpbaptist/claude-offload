@@ -83,7 +83,8 @@ In a fresh session, ask for something qualifying without mentioning local-exec:
 *"add a DTO for the user endpoint"*.
 
 Expect a one-line announcement — *"Delegating the user DTO to local-exec"* —
-followed by the Task call.
+followed by the subagent call (`Agent` in this harness; see
+[#1](https://github.com/rpbaptist/ollama-subagent/issues/1)).
 
 *If it does the work itself:* the `CLAUDE.md` policy isn't landing. Check it
 survived (`grep -n "Delegating mechanical" ~/.claude/CLAUDE.md`). If present,
@@ -108,10 +109,30 @@ reject.
 
 After a week of real use, sanity-check the premise rather than assuming it.
 
-Compare a delegated boilerplate task against doing the same thing directly.
-Watch for the failure mode where a bad generation costs two retries plus a
-review and ends up more expensive than writing it once. If that's common,
-narrow what gets delegated — the fix is scope, not prompt engineering.
+Every `ollama-gen` call — including retries and empty-output failures — is
+logged to `$OLLAMA_GEN_LOG` (default `~/.claude/ollama-gen-usage.jsonl`).
+Run:
+
+```sh
+jq -s 'map(select(.empty_output)) | length' "$OLLAMA_GEN_LOG"
+```
+
+against
+
+```sh
+jq -s 'map(.estimated_tokens_avoided) | add' "$OLLAMA_GEN_LOG"
+```
+
+A high empty-output/retry count relative to the number of distinct `out`
+paths is the failure mode to watch for: a bad generation costs two retries
+plus a review and ends up more expensive than writing it once. If that's
+common, narrow what gets delegated — the fix is scope, not prompt
+engineering. See `README.md`'s ["Usage tracking"](README.md#usage-tracking)
+for the full schema and what "tokens avoided" does and doesn't account for
+— it's an estimate, not a measured net saving, so treat it as a signal, not
+a final number. Comparing a delegated task against writing the same thing
+directly by hand remains the tighter (but manual) check if you want a real
+counterfactual.
 
 Also confirm `--context` files aren't blowing the model's window on larger
 files; whole-file generation degrades past a few hundred lines.

@@ -17,7 +17,7 @@ possible.
 What *is* possible: a CLI wrapper around Ollama, invoked via the Bash tool by a
 cheap Haiku-backed subagent.
 
-## Where the token savings come from
+## Where the savings come from
 
 1. **Context files never enter Claude's context.** `ollama-gen` takes file
    *paths* and reads them from disk itself. Claude passes a path string; Ollama
@@ -33,6 +33,9 @@ tokens*, not "Claude never sees the code."
 
 This does **not** pay off on small edits, where writing a precise task
 description costs more than making the edit. The subagent short-circuits those.
+
+This is now measurable, not just architectural — see
+[Usage tracking](#usage-tracking) below.
 
 ## Install
 
@@ -122,7 +125,52 @@ an actual `ollama-gen` invocation.
 | --- | --- |
 | `OLLAMA_GEN_MODEL` | `gpt-oss-20b-32k:latest` |
 | `OLLAMA_HOST_URL` | `http://localhost:11434` |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` (install only) |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| `OLLAMA_GEN_LOG` | `$CLAUDE_CONFIG_DIR/ollama-gen-usage.jsonl` |
+
+## Usage tracking
+
+Every `ollama-gen` call that reaches Ollama appends one line to
+`$OLLAMA_GEN_LOG` — including retries and calls where the model returned
+empty output. A failed retry still burned real local compute; hiding it
+would hide the exact failure mode worth watching for (see
+["Does it actually save anything"](POST-INSTALL.md#7-does-it-actually-save-anything)
+in `POST-INSTALL.md`).
+Calls that fail before reaching Ollama (missing `--context` file, refusing
+to overwrite without `--force`) log nothing — no API call happened.
+
+There's no counterfactual run to diff against — Claude never generates the
+same file itself to compare — so "tokens saved" isn't a fact this tool can
+produce. Each line reports two differently-certain numbers instead, and they
+are never blended into one figure:
+
+- **Local cost (measured)** — `prompt_eval_count` and `eval_count`, Ollama's
+  own real token counts for the call.
+- **Tokens avoided (estimated)** — `(context_bytes + generated_bytes) / 4`, a
+  rough heuristic for what Claude would have spent reading the context files
+  and writing the output itself, had it done the work directly. This is
+  *not* netted against the task description, the `Task` call, or the
+  review-read — none of those are tracked, and folding them in would imply
+  more precision than the heuristic has.
+
+```json
+{"ts": "2026-09-02T21:14:03Z", "model": "gpt-oss-20b-32k:latest",
+ "out": "src/dto/user.py", "context_files": ["src/models/user.py"],
+ "context_bytes": 812, "generated_bytes": 431, "empty_output": false,
+ "prompt_eval_count": 946, "eval_count": 118,
+ "estimated_tokens_avoided": 310}
+```
+
+```sh
+# Tokens avoided, all time
+jq -s 'map(.estimated_tokens_avoided) | add' "$OLLAMA_GEN_LOG"
+
+# Real local cost, all time
+jq -s 'map((.prompt_eval_count // 0) + (.eval_count // 0)) | add' "$OLLAMA_GEN_LOG"
+
+# Wasted (empty-output) calls
+jq -s 'map(select(.empty_output)) | length' "$OLLAMA_GEN_LOG"
+```
 
 ## What delegates well
 
