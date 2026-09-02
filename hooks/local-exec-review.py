@@ -13,8 +13,6 @@ try:
 except Exception:
     sys.exit(0)
 
-if payload.get("tool_name") != "Task":
-    sys.exit(0)
 if (payload.get("tool_input") or {}).get("subagent_type") != "local-exec":
     sys.exit(0)
 

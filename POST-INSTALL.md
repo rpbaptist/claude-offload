@@ -43,7 +43,7 @@ commenting on the code before saying it's done.
 standalone:
 
 ```sh
-echo '{"tool_name":"Task","cwd":"'"$PWD"'","tool_input":{"subagent_type":"local-exec"}}' \
+echo '{"cwd":"'"$PWD"'","tool_input":{"subagent_type":"local-exec"}}' \
   | ~/.claude/hooks/local-exec-review.py; echo "exit=$?"
 ```
 
@@ -106,6 +106,16 @@ Also confirm `--context` files aren't blowing the model's window on larger
 files; whole-file generation degrades past a few hundred lines.
 
 ---
+
+## Upgrading from a pre-#1 install
+
+If `~/.claude/settings.json` still has `"matcher": "Task"` under
+`PostToolUse` (from an install before the
+[Task→Agent rename fix](https://github.com/rpbaptist/ollama-subagent/issues/1)),
+the hook never fires — the harness's subagent-launching tool is actually named
+`Agent`, not `Task`. Rerun `./install.sh`: it detects the existing entry by
+its `command`, not its stale matcher, and rewrites the matcher to `"*"` in
+place. No manual rollback needed.
 
 ## Rollback
 

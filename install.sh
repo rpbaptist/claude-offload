@@ -52,25 +52,33 @@ hooks = data.setdefault("hooks", {})
 post = hooks.setdefault("PostToolUse", [])
 
 for entry in post:
-    if entry.get("matcher") == "Task":
-        for h in entry.get("hooks", []):
-            if h.get("command") == cmd:
-                print("  ok      PostToolUse/Task hook already present")
-                sys.exit(0)
+    for h in entry.get("hooks", []):
+        if h.get("command") == cmd:
+            if entry.get("matcher") == "*":
+                print("  ok      PostToolUse hook already present")
+            else:
+                shutil.copy2(path, path + ".bak")
+                print(f"  backup  {path}.bak")
+                entry["matcher"] = "*"
+                with open(path, "w") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                print("  upgraded PostToolUse matcher -> *")
+            sys.exit(0)
 
 if os.path.exists(path):
     shutil.copy2(path, path + ".bak")
     print(f"  backup  {path}.bak")
 
 post.append({
-    "matcher": "Task",
+    "matcher": "*",
     "hooks": [{"type": "command", "command": cmd}],
 })
 
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-print("  added   PostToolUse/Task hook")
+print("  added   PostToolUse hook")
 PY
 
 echo "CLAUDE.md:"

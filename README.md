@@ -89,9 +89,14 @@ failure. It has no `Write` tool, so file creation must go through the local
 model. All of this happens in an isolated context, so a multi-file batch's
 generate/lint/retry turns never touch your main session.
 
-**`hooks/local-exec-review.py`** — a `PostToolUse` hook matching the `Task`
-tool. When `local-exec` returns, it tells the orchestrator to review the output
-before treating the work as done. It exits silently for every other subagent.
+**`hooks/local-exec-review.py`** — a `PostToolUse` hook (matcher `"*"`, so it
+runs after every tool call) that filters in-script on
+`tool_input.subagent_type == "local-exec"`, rather than matching on the
+subagent-launching tool's own name — that name has already changed once
+across harness versions (`Task` → `Agent`; see
+[#1](https://github.com/rpbaptist/ollama-subagent/issues/1)). When
+`local-exec` returns, it tells the orchestrator to review the output before
+treating the work as done. It exits silently for every other tool call.
 
 `PostToolUse` ignores `decision` and `additionalContext`, but exit code 2 shows
 stderr to Claude — that's the injection channel. `SubagentStop` can't be used
