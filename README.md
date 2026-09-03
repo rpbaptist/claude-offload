@@ -76,11 +76,13 @@ order — each builds on the last.
 
 ### 1. The agent is registered
 
-Run `/agents`. Expect `local-exec` in the list.
+`/agents` is not available in every Claude Code version. Check directly:
+`readlink -f ~/.claude/agents/local-exec.md` should resolve to
+`agents/local-exec.md` in this repo. If your version does support `/agents`,
+you can also confirm `local-exec` shows up there.
 
-*If missing:* check `~/.claude/agents/local-exec.md` resolves —
-`readlink -f ~/.claude/agents/local-exec.md`. A broken symlink means the repo
-moved after install; rerun `./install.sh`.
+*If the symlink is missing or broken:* the repo moved after install; rerun
+`./install.sh`.
 
 ### 2. The hook is silent for other subagents
 
